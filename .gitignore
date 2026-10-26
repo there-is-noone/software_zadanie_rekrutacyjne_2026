@@ -1,1 +1,7 @@
 **/__pycache__
+.venv/
+.pytest_cache
+*.log
+recordings/
+uv.lock
+

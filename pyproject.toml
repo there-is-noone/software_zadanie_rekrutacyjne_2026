@@ -1,0 +1,15 @@
+[project]
+name = "agh-mission-control"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "bitstruct>=8.24.0",
+    "crccheck>=1.3.1",
+    "nicegui>=3.18.0",
+    "pyyaml>=6.0.3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
