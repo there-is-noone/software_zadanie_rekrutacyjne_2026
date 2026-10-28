@@ -132,7 +132,7 @@ class AutoPilot:
         return True
 
     async def parachute(self, timeout: float = 60.0) -> bool:
-        await self.relay("igniter", False)
+
         self.stage_name = "waiting for apogee"
 
         def at_apogee():
@@ -147,6 +147,7 @@ class AutoPilot:
         if not await self.wait_until(at_apogee, timeout, "apogee"):
             return False
         self.log(f"apogee {self.link.highest_altitude:.2f} m")
+        await self.relay("igniter", False)
         self.stage_name = "parachute"
         return await self.relay("parachute", True)
 
