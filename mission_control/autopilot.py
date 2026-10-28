@@ -31,21 +31,92 @@ class AutoPilot:
         success = await self.command(frame, f"{name} -> {position}")
         return success
 
-    async def fill_oxidizer(self, timeout: float = 30.0) -> bool:
+    async def relay(self, name: str, on: bool) -> bool:
+        frame = self.link.relay_frame(name, on)
+        success = await self.command(frame, f"{name} -> {'ON' if on else 'OFF'}")
+        return success
+
+    async def fill(self, propellant: str, timeout: float = 30.0) -> bool:
         deadline = time.monotonic() + timeout
-        self.stage_name = "oxidizer fill"
-        if not await self.servo("oxidizer_intake", True):
+        self.stage_name = f"{propellant} fill"
+        intake = f"{propellant}_intake"
+        level_sensor = f"{propellant}_level"
+        if not await self.servo(intake, True):
             return False
-        while self.link.latest.get("oxidizer_level", 0) < 100:
-            level = self.link.latest.get("oxidizer_level", 0)
+        level = self.link.latest.get(level_sensor, 0)
+        while level < 100:
+            level = self.link.latest.get(level_sensor, 0)
             if not self.link.connected:
                 self.log("link is not connected")
+                await self.servo(intake, False)
                 return False
             if time.monotonic() > deadline:
-                self.log(f"oxidizer fill timed out at {level:.0f} %")
+                self.log(f"{intake} timed out at {level:.0f} %")
+                await self.servo(intake, False)
                 return False
             await asyncio.sleep(0.2)
-        pressure = self.link.latest.get("oxidizer_pressure", 0)
-        self.log(f"oxidizer full: {level:.0f} %, {pressure:.1f} bar")
-        success = await self.servo("oxidizer_intake", False)
+        self.log(f"{propellant} full: {level:.0f} %")
+        success = await self.servo(intake, False)
         return success
+
+    async def fill_fuel(self, timeout: float = 30.0) -> bool:
+        return await self.fill("fuel", timeout)
+
+    async def fill_oxidizer(self, timeout: float = 30.0) -> bool:
+        return await self.fill("oxidizer", timeout)
+
+    async def heater(self, target: int | float = 60, timeout: float = 20.0) -> bool:
+        deadline = time.monotonic() + timeout
+        self.stage_name = "heater start"
+        if not await self.relay("oxidizer_heater", True):
+            return False
+
+        pressure = self.link.latest.get("oxidizer_pressure", 0)
+        while pressure < target:
+            pressure = self.link.latest.get("oxidizer_pressure", 0)
+            if not self.link.connected:
+                self.log("link is not connected")
+                await self.relay("oxidizer_heater", False)
+                return False
+            if time.monotonic() > deadline:
+                self.log(f"{self.stage_name} timed out at {pressure:.1f} bar")
+                await self.relay("oxidizer_heater", False)
+                return False
+            await asyncio.sleep(0.1)
+        success = await self.relay("oxidizer_heater", False)
+        self.log(f"heater pressure: {pressure} bar")
+        return success
+
+    async def abort_ignition(self):
+        await self.relay("igniter", False)
+        await self.servo("fuel_main", False)
+        await self.servo("oxidizer_main", False)
+
+    async def fire(self):
+        self.stage_name = "ignition"
+        if not self.link.connected:
+            self.log("link is not connected")
+        pressure = self.link.latest.get("oxidizer_pressure", 0)
+        if not 55 <= pressure <= 65:
+            self.log(f"pressure {pressure:.1f} bar outside 55-65, not firing")
+            return False
+        for intake in ("fuel_intake", "oxidizer_intake"):
+            closed = self.link.config.by_name(intake).closed_pos
+            position = self.link.servos.get(intake)
+            if position != closed:
+                self.log(f"{intake} not closed ({position}), not firing")
+                return False
+
+        if not await self.servo("fuel_main", True):
+            await self.abort_ignition()
+            return False
+
+        if not await self.servo("oxidizer_main", True):
+            await self.abort_ignition()
+            return False
+
+        if not await self.servo("igniter", True):
+            await self.abort_ignition()
+            return False
+        timer = time.monotonic()
+        self.log(f"Completed ignition sequence {timer:.2f} s")
