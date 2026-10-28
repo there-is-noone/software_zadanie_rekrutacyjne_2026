@@ -1,5 +1,6 @@
 import asyncio
 import time
+from typing import Callable
 
 from communication_library.frame import Frame
 from mission_control.link import RocketLink
@@ -24,6 +25,20 @@ class AutoPilot:
         self.log(f"{label}: {'ACK' if success else 'no ACK'}")
         return success
 
+    async def wait_until(
+        self, condition: Callable[[], bool], timeout: float, what: str
+    ) -> bool:
+        deadline = time.monotonic() + timeout
+        while not condition():
+            if not self.link.connected:
+                self.log(f"link lost while waiting for {what}")
+                return False
+            if time.monotonic() >= deadline:
+                self.log(f"timed out waiting for {what}")
+                return False
+            await asyncio.sleep(0.2)
+        return True
+
     async def servo(self, name: str, is_open: bool) -> bool:
         servo = self.link.config.by_name(name)
         position = servo.open_pos if is_open else servo.closed_pos
@@ -37,27 +52,19 @@ class AutoPilot:
         return success
 
     async def fill(self, propellant: str, timeout: float = 30.0) -> bool:
-        deadline = time.monotonic() + timeout
         self.stage_name = f"{propellant} fill"
         intake = f"{propellant}_intake"
         level_sensor = f"{propellant}_level"
         if not await self.servo(intake, True):
             return False
-        level = self.link.latest.get(level_sensor, 0)
-        while level < 100:
-            level = self.link.latest.get(level_sensor, 0)
-            if not self.link.connected:
-                self.log("link is not connected")
-                await self.servo(intake, False)
-                return False
-            if time.monotonic() > deadline:
-                self.log(f"{intake} timed out at {level:.0f} %")
-                await self.servo(intake, False)
-                return False
-            await asyncio.sleep(0.2)
-        self.log(f"{propellant} full: {level:.0f} %")
-        success = await self.servo(intake, False)
-        return success
+        level = self.link.sensor(level_sensor)
+        if not await self.wait_until(
+            lambda: self.link.sensor(level_sensor) >= 100, timeout, f"{propellant} full"
+        ):
+            await self.servo(intake, False)
+            return False
+        self.log(f"{propellant} full")
+        return await self.servo(intake, False)
 
     async def fill_fuel(self, timeout: float = 30.0) -> bool:
         return await self.fill("fuel", timeout)
@@ -66,26 +73,19 @@ class AutoPilot:
         return await self.fill("oxidizer", timeout)
 
     async def heater(self, target: int | float = 60, timeout: float = 20.0) -> bool:
-        deadline = time.monotonic() + timeout
         self.stage_name = "heater start"
+
         if not await self.relay("oxidizer_heater", True):
             return False
-
-        pressure = self.link.latest.get("oxidizer_pressure", 0)
-        while pressure < target:
-            pressure = self.link.latest.get("oxidizer_pressure", 0)
-            if not self.link.connected:
-                self.log("link is not connected")
-                await self.relay("oxidizer_heater", False)
-                return False
-            if time.monotonic() > deadline:
-                self.log(f"{self.stage_name} timed out at {pressure:.1f} bar")
-                await self.relay("oxidizer_heater", False)
-                return False
-            await asyncio.sleep(0.1)
-        success = await self.relay("oxidizer_heater", False)
-        self.log(f"heater pressure: {pressure:.1f} bar")
-        return success
+        if not await self.wait_until(
+            lambda: self.link.sensor("oxidizer_pressure") >= target,
+            timeout,
+            f"oxidizer pressure {target} bar",
+        ):
+            await self.relay("oxidizer_heater", False)
+            return False
+        self.log(f"heater pressure: {self.link.sensor('oxidizer_pressure')} bar")
+        return await self.relay("oxidizer_heater", False)
 
     async def abort_ignition(self):
         await self.relay("igniter", False)
@@ -104,7 +104,7 @@ class AutoPilot:
         if not self.link.connected:
             self.log("link is not connected")
             return False
-        pressure = self.link.latest.get("oxidizer_pressure", 0)
+        pressure = self.link.sensor("oxidizer_pressure")
         if not 55 <= pressure <= 65:
             self.log(f"pressure {pressure:.1f} bar outside 55-65, not firing")
             return False
@@ -127,27 +127,25 @@ class AutoPilot:
             await self.abort_ignition()
             return False
         timer = time.monotonic()
-        await self.relay("igniter", False)
+
         self.log(f"Completed ignition sequence {(timer - start):.2f} s")
         return True
 
     async def parachute(self, timeout: float = 60.0) -> bool:
-        deadline = time.monotonic() + timeout
+        await self.relay("igniter", False)
         self.stage_name = "waiting for apogee"
 
-        while True:
-            fuel = self.link.latest.get("fuel_level", 100)
-            altitude = self.link.latest.get("altitude", 0)
-            if fuel <= 0 and altitude > 10 and self.link.velocity <= 0:
-                break
-            if not self.link.connected:
-                self.log("link is not connected")
-                return False
-            if time.monotonic() > deadline:
-                self.log(f"{self.stage_name} timed out at {altitude:.0f} m")
-                return False
-            await asyncio.sleep(0.1)
+        def at_apogee():
+            if (
+                self.link.sensor("fuel_level", 100) <= 0
+                and self.link.sensor("altitude") > 10
+                and self.link.velocity <= 0
+            ):
+                return True
+            return False
 
+        if not await self.wait_until(at_apogee, timeout, "apogee"):
+            return False
         self.log(f"apogee {self.link.highest_altitude:.2f} m")
         self.stage_name = "parachute"
         return await self.relay("parachute", True)
@@ -160,7 +158,7 @@ class AutoPilot:
             history = self.link.altitude_history
             last_reading = history[-1][0] if history else time.monotonic()
             quiet = time.monotonic() - last_reading
-            altitude = self.link.latest.get("altitude", 0)
+            altitude = self.link.sensor("altitude")
             if altitude <= 1:
                 self.log("landed")
                 break

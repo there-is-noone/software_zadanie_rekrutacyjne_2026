@@ -15,10 +15,10 @@ def print_new_logs(pilot: AutoPilot, printed: int) -> int:
 
 def print_status(link: RocketLink, pilot: AutoPilot):
     print(
-        f"   [{pilot.stage_name}] alt={link.latest.get('altitude', 0):6.1f} m "
-        f"v={link.velocity:6.1f} m/s fuel={link.latest.get('fuel_level', 0):5.1f} % "
-        f"ox={link.latest.get('oxidizer_level', 0):5.1f} % "
-        f"p={link.latest.get('oxidizer_pressure', 0):5.1f} bar",
+        f"   [{pilot.stage_name}] alt={link.sensor('altitude'):6.1f} m "
+        f"v={link.velocity:6.1f} m/s fuel={link.sensor('fuel_level'):5.1f} % "
+        f"ox={link.sensor('oxidizer_level'):5.1f} % "
+        f"p={link.sensor('oxidizer_pressure'):5.1f} bar",
         flush=True,
     )
 

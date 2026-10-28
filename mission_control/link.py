@@ -41,6 +41,9 @@ class RocketLink:
         self.cm.connect(self._tcp)
         self.connected = True
 
+    def sensor(self, name: str, default=0) -> float:
+        return self.latest.get(name, default)
+
     def servo_frame(self, name, position) -> Frame:
         return Frame(
             source=ids.BoardID.SOFTWARE,
