@@ -7,21 +7,36 @@ biblioteka zawiera implementacje ramki komunikacyjnej, kodowania/dekodowania, kl
 Dodatkowo zawarliśmy tutaj prosty symulator rakiety ```tcp_simulator.py``` oraz narzędzie do połączenia się z nim ```tcp_proxy.py```.
 Dokumentacja opisująca jak z nich korzystać jest dostępna poniżej pod treścią zadania.
 
-## Zadanie
 
-Celem zadania jest skorzystanie z dostępnych materiałów i przygotowanie kodu wchodzącego w interakcję z symulatorem rakiety. Zadanie nie posiada ścisłego punktu końcowego, to co w nim zrobisz zależy od Ciebie ;) 
-Symulator pozwala na wysyłanie poleceń sterujących do rakiety oraz odbierania potwierdzeń operacji i odczytów z sensorów dostępnych na pokładzie. Za pomocą symulatora można przeprowadzić lot rakiety począwszy od tankowania aż po lądowanie na spadochronie. Konkrety odnośnie działania symulatora są dostępne poniżej w dokumentacji.
 
-Istnieje wiele podejść do tego zadania, Twój kod nie musi nawet wykonywać z sukcesem lotu rakiety!.
-Jeśli wizualizacja danych jest Twoją mocną stroną to możesz skupić się na stworzeniu aplikacji przedstawiającej stan rakiety w czytelny sposób.
-Preferujesz skupić się na locie? Bez problemu, możesz stworzyć aplikację przede wszystkim skupioną na sterowaniu, zawierającą na przykład blokady przed wykonaniem niepoprawnej operacji w danym momencie startu lub całkowicie automatyzującą start i jedynie wyświetlającą progress wykonywanych operacji.
-A może wolisz przerobić którąś z części ```communication_library``` na Rust'a, podpiąć ją do pythona i wykonać resztę lotu prostym skryptem? To również możliwe!
+## Moje rozwiązanie: automatyczny lot (`mission_control`)
 
-Zadanie pozostawia Ci dowolność w wykonaniu tego co zechcesz, chętnie zobaczymy co zdecydujesz się nam przedstawić :)
-Jeśli zabrakło by Ci czasu na dokończenie zadania to bez obaw, śmiało możecie przysyłać zadania nawet jeśli są work in progress albo nie wszystko działa.
-W przypadku jeśli zastanawiasz się z jakiego UI frameworka skorzystać to polecamy NiceGUI (https://nicegui.io/), z którego również sami korzystamy. Jeśli jednak wolisz użyć czegoś innego to też nie ma problemu.
+Program sam przeprowadza całą misję, od tankowania do lądowania:
 
-W razie pytań prosimy kontaktować się na adres mailowy z którego otrzymano informację o przejściu do drugiego etapu, lub zrobić issue w tym repozytorium z pytaniem (szczególnie preferowane jeśli pytanie odnosi się do kodu).
+1. tankowanie utleniacza, potem paliwa (zawory tankowania zamykane po 100%)
+2. podgrzanie utleniacza do ~60 bar (zakres pełnego ciągu to 55–65 bar)
+3. zapłon: oba zawory główne, a zaraz po nich zapalnik (całość w < 1 s)
+4. wykrycie apogeum (brak paliwa i rakieta zaczyna opadać), otwarcie spadochronu
+5. czekanie na lądowanie
+
+Każda komenda jest potwierdzana ramką ACK. Jeśli któryś etap się nie powiedzie, program zatrzymuje się i loguje, gdzie wystąpił błąd. Ctrl+C w trakcie lotu bezpiecznie wyłącza grzałkę i zapalnik oraz zamyka zawory.
+
+Pliki:
+- `mission_control/link.py`: połączenie z rakietą, odbiór telemetrii i ACK, wysyłanie komend
+- `mission_control/autopilot.py`: kolejne etapy lotu
+- `mission_control/fly.py`: uruchamia misję w terminalu i na bieżąco wypisuje log oraz telemetrię
+
+### Uruchomienie
+
+Każda komenda w osobnym terminalu, w tej kolejności:
+
+```
+python tcp_proxy.py
+python tcp_simulator.py
+python -m mission_control.fly
+```
+
+Lot trwa ok. 3 minuty. Symulator sam się wyłącza po wylądowaniu, więc przed kolejnym lotem trzeba go uruchomić ponownie.
 
 Zadania prosimy wrzucać na publiczne repozytorium i przesłanie nam linku do niego na adres mailowy z którego otrzymano informację o przejściu do drugiego etapu. Jeśli nie chcesz wrzucać kodu na publiczne repozytorium to również możesz nam przesłać zip z kodem, chociaż repozytoria bardzo ułatwiłyby nam weryfikację zadań.
 
